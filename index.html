@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IoT IDS XAI — Live Traffic Simulator</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Syne:wght@600;700&display=swap');
+  :root {
+    --bg:#0d0f14; --panel:#13161e; --panel2:#1a1e28; --panel3:#20242f;
+    --border:rgba(255,255,255,0.06); --border2:rgba(255,255,255,0.12);
+    --text:#e2e5ed; --muted:#5a6272; --muted2:#8891a4;
+    --accent:#3b82f6; --green:#22c55e; --red:#ef4444;
+    --amber:#f59e0b; --purple:#a78bfa; --cyan:#06b6d4;
+    --mono:'JetBrains Mono',monospace; --display:'Syne',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden}
+  body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px}
+  body::before{content:'';position:fixed;inset:0;
+    background-image:linear-gradient(rgba(59,130,246,.025) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(59,130,246,.025) 1px,transparent 1px);
+    background-size:40px 40px;pointer-events:none;z-index:0}
+
+  /* ── Header ── */
+  .hdr{position:relative;z-index:10;display:flex;align-items:center;
+       justify-content:space-between;padding:12px 20px;
+       background:var(--panel);border-bottom:1px solid var(--border2);
+       flex-shrink:0}
+  .hdr-l{display:flex;align-items:center;gap:12px}
+  .logo{width:28px;height:28px}
+  .hdr-title{font-family:var(--display);font-size:15px;font-weight:700;
+             letter-spacing:-.02em;color:var(--text)}
+  .hdr-sub{font-size:10px;color:var(--muted);margin-top:1px}
+  .status{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);transition:all .3s}
+  .dot.live{background:var(--green);box-shadow:0 0 5px var(--green);animation:pulse 2s infinite}
+  .dot.err{background:var(--red)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+  /* ── Controls ── */
+  .ctrl{position:relative;z-index:10;display:flex;align-items:center;gap:10px;
+        flex-wrap:wrap;padding:9px 20px;
+        background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0}
+  .cl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  select{background:var(--panel2);border:1px solid var(--border2);color:var(--text);
+         font-family:var(--mono);font-size:11px;padding:5px 8px;border-radius:5px;outline:none}
+  select:focus{border-color:var(--accent)}
+  input[type=range]{accent-color:var(--accent);width:70px;cursor:pointer}
+  .sv{font-size:11px;color:var(--accent);min-width:28px}
+  .btn{padding:6px 14px;border-radius:5px;font-family:var(--mono);font-size:11px;
+       font-weight:500;cursor:pointer;border:1px solid var(--border2);transition:all .12s}
+  .btn-go{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .btn-go:hover{background:#2563eb}
+  .btn-stop{background:transparent;color:var(--red);border-color:rgba(239,68,68,.35)}
+  .btn-stop:hover{background:rgba(239,68,68,.08)}
+  .btn-clr{background:transparent;color:var(--muted2);border-color:var(--border2)}
+  .btn-clr:hover{background:var(--panel2);color:var(--text)}
+  .btn:disabled{opacity:.35;cursor:not-allowed}
+  .sep{width:1px;height:20px;background:var(--border2);flex-shrink:0}
+
+  /* ── Layout ── */
+  .layout{display:flex;flex:1;overflow:hidden;position:relative;z-index:1}
+  .wrap{display:flex;flex-direction:column;height:100vh}
+
+  /* ── Feed panel ── */
+  .feed{display:flex;flex-direction:column;flex:1;min-width:0;overflow:hidden;
+        border-right:1px solid var(--border2)}
+  .feed-hdr{display:flex;align-items:center;justify-content:space-between;
+            padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--border);
+            flex-shrink:0}
+  .feed-hdr-l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
+  .pkt-count{font-size:11px;color:var(--accent);font-weight:500}
+  .cols{display:grid;
+        grid-template-columns:40px 82px 52px 72px 86px 56px 58px 1fr;
+        gap:0 8px;padding:6px 16px;font-size:10px;color:var(--muted);
+        text-transform:uppercase;letter-spacing:.05em;
+        background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0}
+  .feed-body{overflow-y:auto;flex:1}
+  .feed-row{display:grid;
+            grid-template-columns:40px 82px 52px 72px 86px 56px 58px 1fr;
+            gap:0 8px;padding:7px 16px;border-bottom:1px solid var(--border);
+            cursor:pointer;transition:background .1s;align-items:center}
+  .feed-row:hover{background:var(--panel2)}
+  .feed-row.sel{background:rgba(59,130,246,.07);
+                border-left:2px solid var(--accent);padding-left:14px}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+  .feed-row{animation:fadeIn .18s ease}
+
+  /* ── Pills ── */
+  .p{display:inline-flex;align-items:center;padding:2px 7px;border-radius:9px;
+     font-size:10px;font-weight:500;white-space:nowrap}
+  .p-atk{background:rgba(239,68,68,.1);color:#fca5a5;border:1px solid rgba(239,68,68,.18)}
+  .p-ben{background:rgba(34,197,94,.08);color:#86efac;border:1px solid rgba(34,197,94,.15)}
+  .p-ds{background:rgba(59,130,246,.08);color:#93c5fd;border:1px solid rgba(59,130,246,.15)}
+  .p-m{background:rgba(167,139,250,.08);color:#c4b5fd;border:1px solid rgba(167,139,250,.15)}
+  .p-esc{background:rgba(245,158,11,.08);color:#fcd34d;border:1px solid rgba(245,158,11,.15);font-size:9px}
+
+  /* ── Conf bar ── */
+  .cb{display:flex;align-items:center;gap:5px}
+  .cb-bg{width:48px;height:4px;background:rgba(255,255,255,.07);border-radius:2px;flex-shrink:0}
+  .cb-fill{height:100%;border-radius:2px}
+  .cb-txt{font-size:10px;color:var(--muted2)}
+
+  /* ── Latency color ── */
+  .fast{color:var(--green)} .mid{color:var(--amber)} .slow{color:var(--red)}
+
+  /* ── Detail panel ── */
+  .detail{width:320px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden;
+          background:var(--panel)}
+  .detail-hdr{padding:8px 16px;font-size:10px;color:var(--muted);
+              text-transform:uppercase;letter-spacing:.07em;
+              border-bottom:1px solid var(--border);flex-shrink:0}
+  .detail-body{overflow-y:auto;flex:1}
+  .d-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;
+           height:220px;gap:10px;color:var(--muted);font-size:11px}
+
+  .dc{padding:12px 16px;border-bottom:1px solid var(--border)}
+  .dc-title{font-size:10px;color:var(--muted);text-transform:uppercase;
+            letter-spacing:.06em;margin-bottom:8px}
+  .verdict-big{font-family:var(--display);font-size:24px;font-weight:700;
+               letter-spacing:-.02em;margin-bottom:4px}
+  .v-atk{color:var(--red)} .v-ben{color:var(--green)}
+  .conf-line{font-size:11px;color:var(--muted2);margin-bottom:10px}
+  .conf-bold{color:var(--text);font-weight:500}
+  .meta2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .mi{background:var(--panel2);border-radius:5px;padding:7px 9px}
+  .mi-l{font-size:9px;color:var(--muted);margin-bottom:2px}
+  .mi-v{font-size:11px;color:var(--text)}
+
+  /* ── Feature bars ── */
+  .fb-list{display:flex;flex-direction:column;gap:4px}
+  .fb-row{display:flex;align-items:center;gap:6px}
+  .fb-name{width:95px;font-size:9px;color:var(--muted2);text-align:right;
+           flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fb-bg{flex:1;background:rgba(255,255,255,.05);border-radius:2px;height:10px}
+  .fb-fill{height:100%;border-radius:2px;min-width:2px;transition:width .3s}
+  .fb-pos{background:var(--accent)} .fb-neg{background:var(--amber)}
+  .fb-w{width:46px;font-size:9px;color:var(--muted);text-align:right}
+  .fb-tag{font-size:8px;padding:1px 4px;border-radius:3px;flex-shrink:0}
+  .tag-pos{color:var(--red);background:rgba(239,68,68,.1)}
+  .tag-neg{color:var(--green);background:rgba(34,197,94,.1)}
+  .tag-neu{color:var(--muted);background:rgba(255,255,255,.05)}
+
+  /* ── Stats footer ── */
+  .footer{position:relative;z-index:10;display:flex;align-items:center;gap:16px;
+          padding:7px 20px;background:var(--panel);
+          border-top:1px solid var(--border2);flex-shrink:0}
+  .fs{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)}
+  .fv{color:var(--text);font-weight:500}
+  .fv-atk{color:var(--red)} .fv-ben{color:var(--green)}
+  .ml-auto{margin-left:auto}
+  .api-link{color:var(--accent);text-decoration:none;font-size:10px}
+  .api-link:hover{text-decoration:underline}
+
+  /* ── Toast ── */
+  .toast{position:fixed;top:70px;right:16px;z-index:200;
+         background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.25);
+         color:#fca5a5;padding:8px 14px;border-radius:7px;font-size:11px;
+         max-width:340px;display:none}
+  .toast.on{display:block}
+
+  /* ── Empty state ── */
+  .empty-state{display:flex;flex-direction:column;align-items:center;
+               justify-content:center;height:200px;gap:8px;
+               color:var(--muted);font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- Header -->
+<div class="hdr">
+  <div class="hdr-l">
+    <svg class="logo" viewBox="0 0 28 28" fill="none">
+      <path d="M14 2.5L4.5 6.5v8c0 5.3 4.1 10.3 9.5 11.5 5.4-1.2 9.5-6.2 9.5-11.5v-8L14 2.5z"
+            fill="rgba(59,130,246,.15)" stroke="#3b82f6" stroke-width="1.3"/>
+      <path d="M10 14l3 3 5-5" stroke="#3b82f6" stroke-width="1.3"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div>
+      <div class="hdr-title">IoT IDS XAI — Live Traffic Simulator</div>
+      <div class="hdr-sub">tbommawa/iot-ids-api · Hugging Face Spaces</div>
+    </div>
+  </div>
+  <div class="status">
+    <span class="dot" id="dot"></span>
+    <span id="stxt">Idle</span>
+  </div>
+</div>
+
+<!-- Controls -->
+<div class="ctrl">
+  <span class="cl">Dataset</span>
+  <select id="ds">
+    <option value="all">All (rotating)</option>
+    <option value="ciciot2023">CIC-IoT-2023</option>
+    <option value="toniot">TON-IoT</option>
+    <option value="unswnb15">UNSW-NB15</option>
+  </select>
+  <div class="sep"></div>
+  <span class="cl">Model</span>
+  <select id="mdl">
+    <option value="lightgbm">LightGBM (edge)</option>
+    <option value="randomforest">RandomForest (cloud)</option>
+  </select>
+  <div class="sep"></div>
+  <span class="cl">XAI</span>
+  <select id="xai">
+    <option value="lime">LIME (fast)</option>
+    <option value="shap">SHAP (thorough)</option>
+    <option value="none">None (raw speed)</option>
+  </select>
+  <div class="sep"></div>
+  <span class="cl">Speed</span>
+  <input type="range" id="spd" min="1" max="5" value="2" step="1">
+  <span class="sv" id="sv">3s</span>
+  <div class="sep"></div>
+  <button class="btn btn-go" id="bStart" onclick="startSim()">▶ Start</button>
+  <button class="btn btn-stop" id="bStop" onclick="stopSim()" disabled>■ Stop</button>
+  <button class="btn btn-clr" onclick="clearAll()">Clear</button>
+</div>
+
+<div class="layout">
+
+  <!-- Feed -->
+  <div class="feed">
+    <div class="feed-hdr">
+      <span class="feed-hdr-l">Live packet feed</span>
+      <span class="pkt-count" id="pc">0 packets</span>
+    </div>
+    <div class="cols">
+      <span>#</span><span>Dataset</span><span>Model</span>
+      <span>Verdict</span><span>Confidence</span>
+      <span>Infer.</span><span>LIME</span><span>Top feature</span>
+    </div>
+    <div class="feed-body" id="fb">
+      <div class="empty-state" id="es">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" opacity=".25">
+          <circle cx="14" cy="14" r="11" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M14 9v5l3 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+        Press ▶ Start to begin simulation
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail -->
+  <div class="detail">
+    <div class="detail-hdr">Packet detail</div>
+    <div class="detail-body" id="db">
+      <div class="d-empty" id="de">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" opacity=".25">
+          <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M7 12h10M7 8h5M7 16h7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+        Click a packet to inspect
+      </div>
+      <div id="dc" style="display:none"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Footer stats -->
+<div class="footer">
+  <div class="fs">Total <span class="fv" id="ft">0</span></div>
+  <div class="fs">Attacks <span class="fv fv-atk" id="fa">0</span></div>
+  <div class="fs">Benign <span class="fv fv-ben" id="fb2">0</span></div>
+  <div class="fs">Attack rate <span class="fv" id="fr">—</span></div>
+  <div class="fs">Avg infer. <span class="fv" id="fl">—</span></div>
+  <div class="fs">Avg LIME <span class="fv" id="fll">—</span></div>
+  <div class="fs">Escalated <span class="fv" id="fe">0</span></div>
+  <div class="ml-auto">
+    <a class="api-link" href="https://tbommawa-iot-ids-api.hf.space/docs" target="_blank">
+      Open Swagger UI ↗
+    </a>
+  </div>
+</div>
+
+</div><!-- .wrap -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = 'https://tbommawa-iot-ids-api.hf.space';
+const SPEEDS = {1:5000,2:3000,3:2000,4:1200,5:600};
+const SPD_LBL = {1:'5s',2:'3s',3:'2s',4:'1.2s',5:'0.6s'};
+const DS_LBL = {ciciot2023:'CIC-IoT',toniot:'TON-IoT',unswnb15:'UNSW-NB15'};
+const DS_LIST = ['ciciot2023','toniot','unswnb15'];
+
+// Feature lists (from your exported JSON)
+const FEATS = {
+  ciciot2023:['Number','Weight','Duration','IAT','urg_count','rst_count','syn_count',
+              'ack_flag_number','psh_flag_number','Header_Length','flow_duration',
+              'Variance','Std','Tot size','Tot sum','Magnitue','Rate','Srate','HTTPS','Max'],
+  toniot:    ['src_ip_bytes','dst_port','dst_ip_bytes','src_port','conn_state',
+              'src_pkts','dst_pkts','src_bytes','dst_bytes','duration',
+              'dns_AA','dns_RA','dns_RD','dns_rejected','dns_qtype',
+              'dns_qclass','dns_rcode','service','ssl_established','ssl_resumed'],
+  unswnb15:  ['sttl','ct_state_ttl','sbytes','dttl','Sload','ct_srv_dst','smeansz',
+              'Dload','service','ct_srv_src','dmeansz','swin','dwin',
+              'ct_dst_src_ltm','ct_src_ltm','Ltime','Stime','state',
+              'ct_src_dport_ltm','tcprtt'],
+};
+
+// Traffic profiles — scaled values producing real predictions
+const PROFILES = {
+  ciciot2023: {
+    benign:[
+      {Number:-0.07,Weight:-0.26,Duration:-0.20,IAT:-0.08,urg_count:-0.09,rst_count:-0.06,syn_count:-0.06,ack_flag_number:-0.07,psh_flag_number:-0.09,Header_Length:-0.11,flow_duration:-0.19,Variance:-0.11,Std:-0.15,'Tot size':-0.12,'Tot sum':-0.13,Magnitue:0.01,Rate:-0.09,Srate:-0.09,HTTPS:1.23,Max:-0.10},
+      {Number:0.33,Weight:0.44,Duration:-0.20,IAT:0.12,urg_count:-0.09,rst_count:-0.06,syn_count:0.14,ack_flag_number:0.33,psh_flag_number:-0.09,Header_Length:-0.11,flow_duration:0.31,Variance:-0.11,Std:0.15,'Tot size':-0.12,'Tot sum':0.07,Magnitue:0.01,Rate:0.11,Srate:0.11,HTTPS:1.23,Max:0.10},
+      {Number:1.13,Weight:2.14,Duration:3.30,IAT:1.92,urg_count:-0.09,rst_count:-0.06,syn_count:1.34,ack_flag_number:1.93,psh_flag_number:2.21,Header_Length:1.89,flow_duration:3.11,Variance:1.89,Std:1.85,'Tot size':1.88,'Tot sum':1.87,Magnitue:0.01,Rate:1.91,Srate:1.91,HTTPS:-0.81,Max:1.90},
+    ],
+    attack:[
+      {Number:5.13,Weight:6.34,Duration:8.50,IAT:5.12,urg_count:11.91,rst_count:8.94,syn_count:9.54,ack_flag_number:7.13,psh_flag_number:9.31,Header_Length:6.09,flow_duration:8.31,Variance:7.29,Std:6.85,'Tot size':5.88,'Tot sum':5.87,Magnitue:0.01,Rate:5.71,Srate:5.91,HTTPS:-0.81,Max:6.10},
+      {Number:3.53,Weight:4.14,Duration:5.20,IAT:3.62,urg_count:6.51,rst_count:5.44,syn_count:5.94,ack_flag_number:4.63,psh_flag_number:5.91,Header_Length:3.99,flow_duration:5.41,Variance:4.69,Std:4.35,'Tot size':3.48,'Tot sum':3.47,Magnitue:0.01,Rate:3.51,Srate:3.51,HTTPS:1.23,Max:3.60},
+      {Number:7.93,Weight:8.94,Duration:10.90,IAT:7.22,urg_count:14.31,rst_count:11.94,syn_count:12.24,ack_flag_number:9.83,psh_flag_number:12.01,Header_Length:8.89,flow_duration:10.91,Variance:9.99,Std:9.15,'Tot size':8.38,'Tot sum':8.27,Magnitue:0.01,Rate:8.41,Srate:8.61,HTTPS:1.23,Max:8.60},
+    ]
+  },
+  toniot:{
+    benign:[
+      {src_ip_bytes:-0.32,dst_port:-0.41,dst_ip_bytes:-0.30,src_port:-0.19,conn_state:-0.54,src_pkts:-0.32,dst_pkts:-0.30,src_bytes:-0.41,dst_bytes:-0.19,duration:-0.07,dns_AA:0.0,dns_RA:1.0,dns_RD:1.0,dns_rejected:0.0,dns_qtype:-0.54,dns_qclass:-0.41,dns_rcode:-0.30,service:0.12,ssl_established:0.0,ssl_resumed:0.0},
+      {src_ip_bytes:0.48,dst_port:0.39,dst_ip_bytes:0.50,src_port:0.51,conn_state:0.26,src_pkts:0.48,dst_pkts:0.50,src_bytes:0.39,dst_bytes:0.51,duration:1.13,dns_AA:0.0,dns_RA:1.0,dns_RD:1.0,dns_rejected:0.0,dns_qtype:0.26,dns_qclass:0.39,dns_rcode:0.50,service:0.12,ssl_established:1.0,ssl_resumed:0.0},
+      {src_ip_bytes:0.18,dst_port:0.12,dst_ip_bytes:0.22,src_port:0.24,conn_state:0.08,src_pkts:0.18,dst_pkts:0.22,src_bytes:0.12,dst_bytes:0.24,duration:0.53,dns_AA:1.0,dns_RA:0.0,dns_RD:1.0,dns_rejected:0.0,dns_qtype:0.08,dns_qclass:0.12,dns_rcode:0.22,service:-0.88,ssl_established:0.0,ssl_resumed:1.0},
+    ],
+    attack:[
+      {src_ip_bytes:8.48,dst_port:7.39,dst_ip_bytes:9.10,src_port:8.11,conn_state:6.96,src_pkts:8.18,dst_pkts:8.90,src_bytes:7.99,dst_bytes:8.91,duration:7.83,dns_AA:0.0,dns_RA:0.0,dns_RD:0.0,dns_rejected:1.0,dns_qtype:7.26,dns_qclass:7.39,dns_rcode:8.90,service:-0.88,ssl_established:0.0,ssl_resumed:0.0},
+      {src_ip_bytes:5.68,dst_port:4.99,dst_ip_bytes:6.20,src_port:5.61,conn_state:4.56,src_pkts:5.48,dst_pkts:5.80,src_bytes:5.29,dst_bytes:5.91,duration:5.13,dns_AA:0.0,dns_RA:0.0,dns_RD:0.0,dns_rejected:1.0,dns_qtype:4.76,dns_qclass:4.99,dns_rcode:5.90,service:-0.88,ssl_established:0.0,ssl_resumed:0.0},
+      {src_ip_bytes:11.28,dst_port:9.99,dst_ip_bytes:11.60,src_port:10.81,conn_state:9.56,src_pkts:10.88,dst_pkts:11.30,src_bytes:10.49,dst_bytes:11.21,duration:10.33,dns_AA:0.0,dns_RA:0.0,dns_RD:0.0,dns_rejected:1.0,dns_qtype:9.76,dns_qclass:9.99,dns_rcode:11.20,service:-0.88,ssl_established:0.0,ssl_resumed:0.0},
+    ]
+  },
+  unswnb15:{
+    benign:[
+      {sttl:0.87,ct_state_ttl:1.23,sbytes:-0.32,dttl:0.65,Sload:-0.19,ct_srv_dst:0.43,smeansz:-0.30,Dload:0.12,service:0.88,ct_srv_src:0.54,dmeansz:-0.19,swin:1.43,dwin:1.43,ct_dst_src_ltm:-0.32,ct_src_ltm:0.65,Ltime:-0.19,Stime:0.54,state:0.43,ct_src_dport_ltm:-0.30,tcprtt:-0.19},
+      {sttl:0.87,ct_state_ttl:1.23,sbytes:-0.12,dttl:0.65,Sload:0.01,ct_srv_dst:0.43,smeansz:-0.10,Dload:0.32,service:0.88,ct_srv_src:0.54,dmeansz:0.01,swin:1.43,dwin:1.43,ct_dst_src_ltm:-0.12,ct_src_ltm:0.65,Ltime:0.01,Stime:0.54,state:0.43,ct_src_dport_ltm:-0.10,tcprtt:0.01},
+      {sttl:-1.13,ct_state_ttl:-0.77,sbytes:0.18,dttl:-0.35,Sload:0.41,ct_srv_dst:-0.57,smeansz:0.40,Dload:0.72,service:-1.12,ct_srv_src:-0.46,dmeansz:0.41,swin:-0.57,dwin:-0.57,ct_dst_src_ltm:0.18,ct_src_ltm:-0.35,Ltime:0.41,Stime:-0.46,state:-0.57,ct_src_dport_ltm:0.40,tcprtt:0.41},
+    ],
+    attack:[
+      {sttl:-1.13,ct_state_ttl:-0.77,sbytes:7.48,dttl:-0.35,Sload:8.81,ct_srv_dst:5.23,smeansz:8.90,Dload:7.52,service:-1.12,ct_srv_src:5.54,dmeansz:8.81,swin:-0.57,dwin:-0.57,ct_dst_src_ltm:7.48,ct_src_ltm:-0.35,Ltime:8.81,Stime:5.54,state:5.23,ct_src_dport_ltm:8.90,tcprtt:8.81},
+      {sttl:-1.13,ct_state_ttl:-0.77,sbytes:5.18,dttl:-0.35,Sload:6.21,ct_srv_dst:3.23,smeansz:6.30,Dload:5.12,service:-1.12,ct_srv_src:3.54,dmeansz:6.21,swin:-0.57,dwin:-0.57,ct_dst_src_ltm:5.18,ct_src_ltm:-0.35,Ltime:6.21,Stime:3.54,state:3.23,ct_src_dport_ltm:6.30,tcprtt:6.21},
+      {sttl:0.87,ct_state_ttl:1.23,sbytes:9.68,dttl:0.65,Sload:11.21,ct_srv_dst:7.83,smeansz:11.20,Dload:9.92,service:0.88,ct_srv_src:7.94,dmeansz:11.21,swin:1.43,dwin:1.43,ct_dst_src_ltm:9.68,ct_src_ltm:0.65,Ltime:11.21,Stime:7.94,state:7.83,ct_src_dport_ltm:11.20,tcprtt:11.21},
+    ]
+  }
+};
+
+// State
+let timer = null, pkts = [], dsRot = 0, selId = null;
+let stats = {n:0,atk:0,ben:0,lats:[],limeLats:[],esc:0};
+
+// Speed slider
+document.getElementById('spd').oninput = function(){
+  document.getElementById('sv').textContent = SPD_LBL[this.value];
+  if(timer){ stopSim(); startSim(); }
+};
+
+function pickDS(){
+  const v = document.getElementById('ds').value;
+  if(v !== 'all') return v;
+  return DS_LIST[dsRot++ % 3];
+}
+
+function jitter(obj){
+  const r={};
+  for(const[k,v] of Object.entries(obj))
+    r[k] = parseFloat((v + (Math.random()-.5)*.25).toFixed(4));
+  return r;
+}
+
+function pickProfile(ds){
+  const isAtk = Math.random() < 0.55;
+  const pool = PROFILES[ds][isAtk?'attack':'benign'];
+  return jitter(pool[Math.floor(Math.random()*pool.length)]);
+}
+
+async function fire(){
+  const ds  = pickDS();
+  const mdl = document.getElementById('mdl').value;
+  const xai = document.getElementById('xai').value;
+  const feats = pickProfile(ds);
+
+  const body = {
+    dataset:ds, model:mdl, features:feats,
+    explain: xai !== 'none',
+    xai_method: xai === 'none' ? 'lime' : xai,
+    confidence_threshold: 0.85
+  };
+
+  let res;
+  try{
+    const r = await fetch(`${API}/predict`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    if(!r.ok){ const t=await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0,100)}`); }
+    res = await r.json();
+  }catch(e){
+    showToast('API error: '+e.message); setStatus('err'); return;
+  }
+
+  setStatus('live');
+  const id = ++stats.n;
+  const pkt = {id,ds,mdl,feats,res};
+  pkts.unshift(pkt);
+  if(pkts.length>200) pkts.pop();
+
+  if(res.prediction==='Attack') stats.atk++; else stats.ben++;
+  stats.lats.push(res.latency_ms);
+  if(stats.lats.length>60) stats.lats.shift();
+  if(res.escalated) stats.esc++;
+  const le = res.explanations?.find(e=>e.method==='lime');
+  if(le){ stats.limeLats.push(le.latency_ms); if(stats.limeLats.length>60) stats.limeLats.shift(); }
+
+  addRow(pkt);
+  updStats();
+
+  // If this packet is currently selected, refresh detail
+  if(selId === id) showDetail(pkt);
+}
+
+function addRow(pkt){
+  const {id,ds,mdl,res} = pkt;
+  const isAtk = res.prediction==='Attack';
+  const conf = res.confidence;
+  const le = res.explanations?.find(e=>e.method==='lime');
+  const se = res.explanations?.find(e=>e.method==='shap');
+  const topExp = le||se;
+  const topFeat = topExp?.top_features?.find(f=>Math.abs(f.weight??f.shap_value??0)>0)?.feature
+                  ?? topExp?.top_features?.[0]?.feature ?? '—';
+  const limeLat = le ? le.latency_ms.toFixed(1)+'ms' : '—';
+  const latC = res.latency_ms<1?'fast':res.latency_ms<5?'mid':'slow';
+
+  const fb = document.getElementById('fb');
+  document.getElementById('es').style.display='none';
+
+  const row = document.createElement('div');
+  row.className='feed-row';
+  row.dataset.id=id;
+  row.innerHTML=`
+    <span style="color:var(--muted)">#${id}</span>
+    <span><span class="p p-ds">${DS_LBL[ds]}</span></span>
+    <span><span class="p p-m">${mdl==='lightgbm'?'LGBM':'RF'}</span></span>
+    <span>
+      <span class="p ${isAtk?'p-atk':'p-ben'}">${res.prediction}</span>
+      ${res.escalated?'<span class="p p-esc" style="margin-left:3px">SHAP</span>':''}
+    </span>
+    <span>
+      <div class="cb">
+        <div class="cb-bg"><div class="cb-fill" style="width:${Math.round(conf*100)}%;background:${isAtk?'var(--red)':'var(--green)'}"></div></div>
+        <span class="cb-txt">${(conf*100).toFixed(0)}%</span>
+      </div>
+    </span>
+    <span class="${latC}">${res.latency_ms.toFixed(3)}ms</span>
+    <span style="color:var(--muted2)">${limeLat}</span>
+    <span style="color:var(--muted2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${topFeat}</span>
+  `;
+  row.addEventListener('click', ()=>{ selectPkt(id); });
+  fb.insertBefore(row, fb.firstChild);
+
+  // trim DOM
+  const rows = fb.querySelectorAll('.feed-row');
+  if(rows.length>100) rows[rows.length-1].remove();
+}
+
+function selectPkt(id){
+  selId = id;
+  document.querySelectorAll('.feed-row').forEach(r=>{
+    r.classList.toggle('sel', parseInt(r.dataset.id)===id);
+  });
+  const pkt = pkts.find(p=>p.id===id);
+  if(pkt) showDetail(pkt);
+}
+
+function showDetail(pkt){
+  const {id,ds,mdl,feats,res} = pkt;
+  const isAtk = res.prediction==='Attack';
+
+  // Build XAI section
+  const le = res.explanations?.find(e=>e.method==='lime');
+  const se = res.explanations?.find(e=>e.method==='shap');
+  const exp = le||se;
+
+  let xaiHtml='';
+  if(exp && exp.top_features.length>0){
+    const featsArr = exp.top_features.slice(0,10);
+    const maxW = Math.max(...featsArr.map(f=>Math.abs(f.weight??f.shap_value??0)),0.001);
+    const hasRealWeights = featsArr.some(f=>Math.abs(f.weight??f.shap_value??0)>0.001);
+
+    if(hasRealWeights){
+      xaiHtml = `
+      <div class="dc">
+        <div class="dc-title">${exp.method.toUpperCase()} feature importance · ${exp.latency_ms.toFixed(1)}ms</div>
+        <div class="fb-list">
+          ${featsArr.map(f=>{
+            const w = f.weight!==undefined?f.weight:(f.shap_value??0);
+            const pct = Math.max(Math.round(Math.abs(w)/maxW*100),2);
+            const isPos = w>0;
+            const fname = f.feature.length>14?f.feature.slice(0,14)+'…':f.feature;
+            const tagCls = Math.abs(w)<0.001?'tag-neu':isPos?'tag-pos':'tag-neg';
+            const tagLbl = Math.abs(w)<0.001?'—':isPos?'↑atk':'↓ben';
+            return `<div class="fb-row">
+              <span class="fb-name">${fname}</span>
+              <div class="fb-bg"><div class="fb-fill ${isPos?'fb-pos':'fb-neg'}" style="width:${pct}%"></div></div>
+              <span class="fb-tag ${tagCls}">${tagLbl}</span>
+              <span class="fb-w">${w.toFixed(4)}</span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    } else {
+      xaiHtml = `<div class="dc"><div class="dc-title">${exp.method.toUpperCase()} · ${exp.latency_ms.toFixed(1)}ms</div>
+        <div style="color:var(--muted);font-size:10px;line-height:1.6">
+          LIME ran successfully but weights are near-zero.<br>
+          This happens when the sample is close to the background distribution.<br>
+          Update <code>main.py</code> with the fixed LIME background (v2).
+          <br><br>Top features returned: ${featsArr.slice(0,5).map(f=>f.feature).join(', ')}
+        </div>
+      </div>`;
+    }
+  } else if(exp){
+    xaiHtml = `<div class="dc"><div class="dc-title">${exp.method.toUpperCase()}</div>
+      <div style="color:var(--muted);font-size:10px">No top features returned.</div></div>`;
+  }
+
+  // Raw features (first 10)
+  const featEntries = Object.entries(feats).slice(0,10);
+  const rawHtml = featEntries.map(([k,v])=>
+    `<span style="color:var(--text)">${k}</span><span style="color:var(--muted2)">:${v.toFixed(3)}</span>`
+  ).join('  ');
+
+  document.getElementById('de').style.display='none';
+  const dc = document.getElementById('dc');
+  dc.style.display='block';
+  dc.innerHTML=`
+    <div class="dc">
+      <div class="verdict-big ${isAtk?'v-atk':'v-ben'}">
+        ${isAtk?'⚠ ATTACK':'✓ BENIGN'}
+      </div>
+      <div class="conf-line">
+        Confidence: <span class="conf-bold">${(res.confidence*100).toFixed(1)}%</span>
+        &nbsp;·&nbsp;
+        ${res.escalated
+          ? '<span style="color:var(--amber)">SHAP escalated</span>'
+          : '<span style="color:var(--green)">LIME edge tier</span>'}
+      </div>
+      <div class="meta2">
+        <div class="mi"><div class="mi-l">Packet</div><div class="mi-v">#${id}</div></div>
+        <div class="mi"><div class="mi-l">Dataset</div><div class="mi-v">${DS_LBL[ds]||ds}</div></div>
+        <div class="mi"><div class="mi-l">Model</div><div class="mi-v">${mdl}</div></div>
+        <div class="mi"><div class="mi-l">Infer. latency</div>
+          <div class="mi-v" style="color:var(--green)">${res.latency_ms.toFixed(3)}ms</div></div>
+        <div class="mi"><div class="mi-l">Features</div><div class="mi-v">${res.feature_count}</div></div>
+        <div class="mi"><div class="mi-l">Timestamp</div>
+          <div class="mi-v">${new Date(res.timestamp*1000).toLocaleTimeString()}</div></div>
+      </div>
+    </div>
+    ${xaiHtml}
+    <div class="dc">
+      <div class="dc-title">Feature vector (first 10 of ${Object.keys(feats).length})</div>
+      <div style="font-size:10px;color:var(--muted2);line-height:1.9;word-break:break-all">
+        ${rawHtml}
+        <br><span style="color:var(--muted)">…${Object.keys(feats).length-10} more</span>
+      </div>
+    </div>
+  `;
+}
+
+function updStats(){
+  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b)/arr.length : null;
+  document.getElementById('ft').textContent  = stats.n;
+  document.getElementById('fa').textContent  = stats.atk;
+  document.getElementById('fb2').textContent = stats.ben;
+  document.getElementById('fr').textContent  = stats.n ? (stats.atk/stats.n*100).toFixed(1)+'%' : '—';
+  const al = avg(stats.lats);
+  document.getElementById('fl').textContent  = al ? al.toFixed(3)+'ms' : '—';
+  const ll = avg(stats.limeLats);
+  document.getElementById('fll').textContent = ll ? ll.toFixed(1)+'ms' : '—';
+  document.getElementById('fe').textContent  = stats.esc;
+  document.getElementById('pc').textContent  = stats.n+' packets';
+}
+
+function setStatus(s){
+  const d=document.getElementById('dot'), t=document.getElementById('stxt');
+  d.className='dot'+(s==='live'?' live':s==='err'?' err':'');
+  t.textContent = s==='live'?'Live':s==='err'?'Error':'Idle';
+  t.style.color = s==='live'?'var(--green)':s==='err'?'var(--red)':'var(--muted)';
+}
+
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('on');
+  setTimeout(()=>t.classList.remove('on'),5000);
+}
+
+function startSim(){
+  if(timer) return;
+  const delay = SPEEDS[document.getElementById('spd').value];
+  fire();
+  timer = setInterval(fire, delay);
+  document.getElementById('bStart').disabled=true;
+  document.getElementById('bStop').disabled=false;
+  setStatus('live');
+}
+
+function stopSim(){
+  clearInterval(timer); timer=null;
+  document.getElementById('bStart').disabled=false;
+  document.getElementById('bStop').disabled=true;
+  setStatus('idle');
+}
+
+function clearAll(){
+  pkts=[]; stats={n:0,atk:0,ben:0,lats:[],limeLats:[],esc:0}; dsRot=0; selId=null;
+  document.getElementById('fb').innerHTML =
+    '<div class="empty-state" id="es"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" opacity=".25"><circle cx="14" cy="14" r="11" stroke="currentColor" stroke-width="1.3"/><path d="M14 9v5l3 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>Press ▶ Start to begin simulation</div>';
+  document.getElementById('de').style.display='flex';
+  document.getElementById('dc').style.display='none';
+  updStats();
+}
+</script>
+</body>
+</html>
